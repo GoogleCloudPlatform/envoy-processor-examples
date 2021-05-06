@@ -1,0 +1,80 @@
+static_resources:
+  listeners:
+  - name: http
+    address:
+      socket_address: 
+        address: 127.0.0.1
+        port_value: 10000
+    filter_chains:
+    - filters:
+      - name: envoy.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          codec_type: AUTO
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: local_service
+              domains: 
+                - "*"
+              routes:
+              - match: 
+                  prefix: "/"
+                route: 
+                  cluster: test
+
+          http_filters:
+          - name: envoy.filters.http.ext_proc
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3alpha.ExternalProcessor
+              failure_mode_allow: false
+              processing_mode:
+                response_trailer_mode: SEND
+              message_timeout:
+                seconds: 30
+              grpc_service:
+                timeout:
+                  seconds: 30
+                envoy_grpc:
+                  cluster_name: processor
+          - name: envoy.filters.http.router
+            typed_config: {}
+
+  clusters:
+  - name: test
+    connect_timeout: 0.25s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    http2_protocol_options: {}
+    load_assignment:
+      cluster_name: test
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 10001
+  - name: processor
+    connect_timeout: 0.25s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    http2_protocol_options: {}
+    load_assignment:
+      cluster_name: processor
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 10002
+
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 0
+                
