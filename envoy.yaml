@@ -29,13 +29,11 @@ static_resources:
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3alpha.ExternalProcessor
               failure_mode_allow: false
-              processing_mode:
-                response_trailer_mode: SEND
               message_timeout:
-                seconds: 30
+                seconds: 2
               grpc_service:
                 timeout:
-                  seconds: 30
+                  seconds: 600
                 envoy_grpc:
                   cluster_name: processor
           - name: envoy.filters.http.router

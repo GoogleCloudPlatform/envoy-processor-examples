@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"regexp"
@@ -44,10 +46,16 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 		// Pass through the basic ones so that the test target works as designed.
 		// Just close the stream, which indicates "no more processing"
 		return nil
+	case "/echostreaming":
+		return processEchoStreaming(stream)
+	case "/echoencode":
+		return processEncodeDecode(stream)
 	case "/addHeader":
 		return processAddHeader(stream)
 	case "/checkJson":
 		return processCheckJson(stream, headers)
+	case "/getToPost":
+		return processGetToPost(stream, headers)
 	case "/notfound":
 		return processNotFound(stream)
 	}
@@ -287,6 +295,230 @@ func processCheckJson(stream extproc.ExternalProcessor_ProcessServer,
 		},
 	}
 	return stream.Send(responseHeadersResponse)
+}
+
+const newJsonMessage = `
+{
+  "message": "Hello!",
+  "recipients": ["World"],
+}
+`
+
+// This replaces the incoming HTTP request with a POST
+func processGetToPost(stream extproc.ExternalProcessor_ProcessServer,
+	requestHeaders *extproc.HttpHeaders) error {
+	requestHeadersResponse := &extproc.HeadersResponse{
+		Response: &extproc.CommonResponse{
+			Status:         extproc.CommonResponse_CONTINUE_AND_REPLACE,
+			HeaderMutation: &extproc.HeaderMutation{},
+			BodyMutation: &extproc.BodyMutation{
+				Mutation: &extproc.BodyMutation_Body{
+					Body: []byte(newJsonMessage),
+				},
+			},
+		},
+	}
+	setHeader(requestHeadersResponse.Response.HeaderMutation, ":method", "POST")
+	setHeader(requestHeadersResponse.Response.HeaderMutation, ":path", "/echo")
+	setHeader(requestHeadersResponse.Response.HeaderMutation, "content-type", "application/json")
+	return stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_RequestHeaders{
+			RequestHeaders: requestHeadersResponse,
+		},
+	})
+}
+
+// This example processes both the request and response bodies in streaming
+// mode and calculates a SHA-256 checksum, which it prints out at the end.
+func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error {
+	logger.Debug("processEchoStreaming")
+	// We already have the request headers, so first send back the request body
+	// message.
+	err := stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_RequestHeaders{
+			RequestHeaders: &extproc.HeadersResponse{
+				Response: &extproc.CommonResponse{
+					HeaderMutation: &extproc.HeaderMutation{
+						SetHeaders: []*core.HeaderValueOption{
+							{
+								Header: &core.HeaderValue{
+									Key:   ":path",
+									Value: "/echo",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		ModeOverride: &extproc_cfg.ProcessingMode{
+			RequestBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+		 	ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	// When streaming, the request will always come before the request body
+	// or the response, but other than that everything will be interleaved.
+	// For that reason, we'll pull messages from the stream and react to
+	// whatever we get.
+	for { 
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			logger.Warnf("Error receiving from stream: %v", err)
+			return err
+		}
+
+		if msg.GetRequestBody() != nil {
+			logger.Debugf("Request body: %d bytes. End = %v",
+				len(msg.GetRequestBody().Body), msg.GetRequestBody().EndOfStream)
+			// TODO calculate checksum
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_RequestBody{},
+			})
+
+		} else if msg.GetResponseBody() != nil {
+			logger.Debugf("Response body: %d bytes. End = %v",
+				len(msg.GetResponseBody().Body), msg.GetResponseBody().EndOfStream)
+			// TODO calculate checksum
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseBody{},
+			})
+
+		} else if msg.GetResponseHeaders() != nil {
+			logger.Debug("Got response headers")
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseHeaders{},
+			})
+		
+		} else {
+			logger.Debug("Got an unknown message")
+		}
+	}
+}
+
+// This example generates a random key, encodes the body using base64,
+// and forwards the body to the "/echo" endpoint, which echoes it back. This
+// shows a way to do streaming.
+func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
+	logger.Debug("processEncodeDecode")
+	// We already have the request headers, so first send back the request body
+	// message.
+	err := stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_RequestHeaders{
+			RequestHeaders: &extproc.HeadersResponse{
+				Response: &extproc.CommonResponse{
+					HeaderMutation: &extproc.HeaderMutation{
+						SetHeaders: []*core.HeaderValueOption{
+							{
+								Header: &core.HeaderValue{
+									Key:   ":path",
+									Value: "/echo",
+								},
+							},
+						},
+						RemoveHeaders: []string{"content-length"},
+					},
+				},
+			},
+		},
+		ModeOverride: &extproc_cfg.ProcessingMode{
+			RequestBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+		 	//ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	encBuf := &bytes.Buffer{}
+	encoder := base64.NewEncoder(base64.RawStdEncoding, encBuf)
+	
+	for { 
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			logger.Warnf("Error receiving from stream: %v", err)
+			return err
+		}
+
+		if msg.GetRequestBody() != nil {
+			logger.Debugf("Request: Encode %d", len(msg.GetRequestBody().Body))
+			encoder.Write(msg.GetRequestBody().Body)
+			if msg.GetRequestBody().EndOfStream {
+				logger.Debugf("Request: EOF")
+				encoder.Close()
+			}
+			decoded := make([]byte, encBuf.Len())
+			encBuf.Read(decoded)
+			logger.Debugf("After read: %d", encBuf.Len())
+			logger.Debugf("Request: encoded = %d", len(decoded))
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_RequestBody{
+					RequestBody: &extproc.BodyResponse{
+						Response: &extproc.CommonResponse{
+							BodyMutation: &extproc.BodyMutation{
+								Mutation: &extproc.BodyMutation_Body{
+									Body: decoded,
+								},
+							},
+						},
+					},
+				},
+			})
+
+		} else if msg.GetResponseBody() != nil {
+			logger.Debugf("Response body: %d bytes. End = %v",
+				len(msg.GetResponseBody().Body), msg.GetResponseBody().EndOfStream)
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseBody{},
+			})
+
+		} else if msg.GetResponseHeaders() != nil {
+			logger.Debug("Got response headers")
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseHeaders{},
+			})
+		
+		} else {
+			logger.Debug("Got an unknown message")
+		}
+	}
+}
+
+// This function assembles an "immediate response" message, which will
+// return an error directly to the downstream
+func sendImmediateResponse(stream extproc.ExternalProcessor_ProcessServer,
+	status envoy_type.StatusCode, message, details string) error {
+	immediateResponse := &extproc.ImmediateResponse{
+		Status: &envoy_type.HttpStatus{
+			Code: status,
+		},
+		Headers: &extproc.HeaderMutation{},
+		Body:    message,
+		Details: details,
+	}
+	setHeader(immediateResponse.Headers, "content-type", "text/plain")
+	return stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_ImmediateResponse{
+			ImmediateResponse: immediateResponse,
+		},
+	})
+}
+
+// This function adds a header to an existing "HeaderMutation" message
+func setHeader(mutation *extproc.HeaderMutation, name, value string) {
+	mutation.SetHeaders = append(mutation.SetHeaders, &core.HeaderValueOption{
+		Header: &core.HeaderValue{
+			Key:   name,
+			Value: value,
+		},
+	})
 }
 
 // getHeaderValue returns the value of the first HTTP header in the map that matches.
