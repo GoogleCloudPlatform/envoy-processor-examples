@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	kDefaultSize = 100
-	kPattern     = "0123456789"
+	defaultSize = 100
+	pattern     = "0123456789"
 )
 
 const helpMessage = `GET  /                 : Print default message
@@ -37,7 +37,7 @@ PUT /database/{key}    : Update the record stored by POST to /database,
 
 var jsonContent = regexp.MustCompile("^application/json(;.*)?$")
 
-type sampleJsonMessage struct {
+type sampleJSONMessage struct {
 	Testing       int    `json:"testing"`
 	IsTesting     bool   `json:"isTesting"`
 	HowTestyAreWe string `json:"howTestyAreWe"`
@@ -56,8 +56,8 @@ func createHandler() http.Handler {
 	router.GET("/help", handleHelp)
 	router.GET("/hello", handleHello)
 	router.POST("/echo", handleEcho)
-	router.GET("/json", handleJson)
-	router.GET("/json-trailers", handleJsonWithTrailers)
+	router.GET("/json", handleJSON)
+	router.GET("/json-trailers", handleJSONWithTrailers)
 	router.GET("/data", handleData)
 	router.POST("/database", func(resp http.ResponseWriter, req *http.Request, params httprouter.Params) {
 		handleDatabasePost(resp, req, data)
@@ -98,9 +98,9 @@ func handleEcho(resp http.ResponseWriter, req *http.Request, params httprouter.P
 	io.Copy(resp, req.Body)
 }
 
-func handleJson(resp http.ResponseWriter, req *http.Request, params httprouter.Params) {
+func handleJSON(resp http.ResponseWriter, req *http.Request, params httprouter.Params) {
 	optionalSize := parseSize(req, 0)
-	msg := sampleJsonMessage{
+	msg := sampleJSONMessage{
 		Testing:       123,
 		IsTesting:     true,
 		HowTestyAreWe: "Very!",
@@ -114,8 +114,8 @@ func handleJson(resp http.ResponseWriter, req *http.Request, params httprouter.P
 	enc.Encode(&msg)
 }
 
-func handleJsonWithTrailers(resp http.ResponseWriter, req *http.Request, params httprouter.Params) {
-	msg := sampleJsonMessage{
+func handleJSONWithTrailers(resp http.ResponseWriter, req *http.Request, params httprouter.Params) {
+	msg := sampleJSONMessage{
 		Testing:       123,
 		IsTesting:     true,
 		HowTestyAreWe: "Very!",
@@ -129,13 +129,13 @@ func handleJsonWithTrailers(resp http.ResponseWriter, req *http.Request, params 
 }
 
 func handleData(resp http.ResponseWriter, req *http.Request, params httprouter.Params) {
-	size := parseSize(req, kDefaultSize)
+	size := parseSize(req, defaultSize)
 	resp.Header().Add("content-type", "application/octet-stream")
 	resp.Header().Add("content-length", strconv.Itoa(size))
 	resp.Write(makeData(size))
 }
 
-func readJsonBody(resp http.ResponseWriter, req *http.Request) ([]byte, *databaseRecord, error) {
+func readJSONBody(resp http.ResponseWriter, req *http.Request) ([]byte, *databaseRecord, error) {
 	if !jsonContent.MatchString(req.Header.Get("Content-Type")) {
 		sendError(415, "Only JSON content is supported", resp)
 		return nil, nil, errors.New("Invalid content type")
@@ -155,7 +155,7 @@ func readJsonBody(resp http.ResponseWriter, req *http.Request) ([]byte, *databas
 }
 
 func handleDatabasePost(resp http.ResponseWriter, req *http.Request, data map[string][]byte) {
-	body, record, err := readJsonBody(resp, req)
+	body, record, err := readJSONBody(resp, req)
 	if err == nil {
 		data[record.Key] = body
 		resp.WriteHeader(201)
@@ -180,7 +180,7 @@ func handleDatabasePut(resp http.ResponseWriter, req *http.Request, params httpr
 		sendError(404, "Not found", resp)
 		return
 	}
-	body, newRecord, err := readJsonBody(resp, req)
+	body, newRecord, err := readJSONBody(resp, req)
 	if err == nil {
 		if newRecord.Key != key {
 			sendError(400, "Key does not match", resp)
@@ -204,10 +204,9 @@ func parseSize(req *http.Request, defaultSize int) int {
 	sizeStr := req.URL.Query().Get("size")
 	if sizeStr == "" {
 		return defaultSize
-	} else {
-		size, _ := strconv.Atoi(sizeStr)
-		return size
 	}
+	size, _ := strconv.Atoi(sizeStr)
+	return size
 }
 
 func makeData(size int) []byte {
@@ -215,9 +214,9 @@ func makeData(size int) []byte {
 	for pos := 0; pos < size; pos += 10 {
 		remaining := size - pos
 		if remaining < 10 {
-			buf.Write([]byte(kPattern[:remaining]))
+			buf.Write([]byte(pattern[:remaining]))
 		} else {
-			buf.Write([]byte(kPattern))
+			buf.Write([]byte(pattern))
 		}
 	}
 	return buf.Bytes()

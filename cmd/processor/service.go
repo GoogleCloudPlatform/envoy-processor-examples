@@ -8,12 +8,12 @@ import (
 	"regexp"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	extproc_cfg "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_proc/v3alpha"
-	extproc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3alpha"
+	extproc_cfg "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_proc/v3"
+	extproc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	envoy_type "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 )
 
-var contentTypeJson = regexp.MustCompile("^(application|text)/json(;.*)?$")
+var contentTypeJSON = regexp.MustCompile("^(application|text)/json(;.*)?$")
 
 type processorService struct{}
 
@@ -53,7 +53,7 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 	case "/addHeader":
 		return processAddHeader(stream)
 	case "/checkJson":
-		return processCheckJson(stream, headers)
+		return processCheckJSON(stream, headers)
 	case "/getToPost":
 		return processGetToPost(stream, headers)
 	case "/notfound":
@@ -172,7 +172,7 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 // Among other things, this example shows the ablility of an external processor
 // to decide how much of the request and response it needs to process based
 // on input.
-func processCheckJson(stream extproc.ExternalProcessor_ProcessServer,
+func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 	requestHeaders *extproc.HttpHeaders) error {
 	// Set the path to "/echo" to get the right functionality on the target.
 	requestHeadersResponse := &extproc.ProcessingResponse{
@@ -197,8 +197,8 @@ func processCheckJson(stream extproc.ExternalProcessor_ProcessServer,
 	// If the content-type header looks like JSON, then ask for the request body
 	contentType := getHeaderValue(requestHeaders.Headers, "content-type")
 	logger.Debugf("Checking content-type %s to see if it is JSON", contentType)
-	contentIsJson := !requestHeaders.EndOfStream && contentTypeJson.MatchString(contentType)
-	if contentIsJson {
+	contentIsJSON := !requestHeaders.EndOfStream && contentTypeJSON.MatchString(contentType)
+	if contentIsJSON {
 		requestHeadersResponse.ModeOverride = &extproc_cfg.ProcessingMode{
 			RequestBodyMode: extproc_cfg.ProcessingMode_BUFFERED,
 		}
@@ -212,7 +212,7 @@ func processCheckJson(stream extproc.ExternalProcessor_ProcessServer,
 	var msg *extproc.ProcessingRequest
 	var jsonStatus string
 
-	if contentIsJson {
+	if contentIsJSON {
 		msg, err = stream.Recv()
 		if err != nil {
 			return err
@@ -297,7 +297,7 @@ func processCheckJson(stream extproc.ExternalProcessor_ProcessServer,
 	return stream.Send(responseHeadersResponse)
 }
 
-const newJsonMessage = `
+const newJSONMessage = `
 {
   "message": "Hello!",
   "recipients": ["World"],
@@ -313,7 +313,7 @@ func processGetToPost(stream extproc.ExternalProcessor_ProcessServer,
 			HeaderMutation: &extproc.HeaderMutation{},
 			BodyMutation: &extproc.BodyMutation{
 				Mutation: &extproc.BodyMutation_Body{
-					Body: []byte(newJsonMessage),
+					Body: []byte(newJSONMessage),
 				},
 			},
 		},
@@ -352,8 +352,8 @@ func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error 
 			},
 		},
 		ModeOverride: &extproc_cfg.ProcessingMode{
-			RequestBodyMode: extproc_cfg.ProcessingMode_STREAMED,
-		 	ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+			RequestBodyMode:  extproc_cfg.ProcessingMode_STREAMED,
+			ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
 		},
 	})
 	if err != nil {
@@ -364,7 +364,7 @@ func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error 
 	// or the response, but other than that everything will be interleaved.
 	// For that reason, we'll pull messages from the stream and react to
 	// whatever we get.
-	for { 
+	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -394,7 +394,7 @@ func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error 
 			stream.Send(&extproc.ProcessingResponse{
 				Response: &extproc.ProcessingResponse_ResponseHeaders{},
 			})
-		
+
 		} else {
 			logger.Debug("Got an unknown message")
 		}
@@ -428,7 +428,7 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 		},
 		ModeOverride: &extproc_cfg.ProcessingMode{
 			RequestBodyMode: extproc_cfg.ProcessingMode_STREAMED,
-		 	//ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+			//ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
 		},
 	})
 	if err != nil {
@@ -437,8 +437,8 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 
 	encBuf := &bytes.Buffer{}
 	encoder := base64.NewEncoder(base64.RawStdEncoding, encBuf)
-	
-	for { 
+
+	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -484,7 +484,7 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 			stream.Send(&extproc.ProcessingResponse{
 				Response: &extproc.ProcessingResponse_ResponseHeaders{},
 			})
-		
+
 		} else {
 			logger.Debug("Got an unknown message")
 		}

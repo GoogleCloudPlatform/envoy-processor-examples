@@ -28,7 +28,6 @@ static_resources:
           - name: envoy.filters.http.ext_proc
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
-              failure_mode_allow: false
               message_timeout:
                 seconds: 2
               grpc_service:
@@ -75,4 +74,3 @@ admin:
     socket_address:
       address: 127.0.0.1
       port_value: 0
-                

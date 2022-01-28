@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 
-	extproc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3alpha"
+	extproc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
