@@ -1,9 +1,25 @@
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"regexp"
 
@@ -46,8 +62,8 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 		// Pass through the basic ones so that the test target works as designed.
 		// Just close the stream, which indicates "no more processing"
 		return nil
-	case "/echostreaming":
-		return processEchoStreaming(stream)
+	case "/echohashstream":
+		return processEchoHashStreaming(stream)
 	case "/echoencode":
 		return processEncodeDecode(stream)
 	case "/addHeader":
@@ -328,10 +344,20 @@ func processGetToPost(stream extproc.ExternalProcessor_ProcessServer,
 	})
 }
 
-// This example processes both the request and response bodies in streaming
-// mode and calculates a SHA-256 checksum, which it prints out at the end.
-func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error {
-	logger.Debug("processEchoStreaming")
+// This example processes the request and response bodies using streaming mode,
+// calculates a SHA-256 hash for each, and prints out both.
+// (With the "/echo" target on the HTTP target in this
+// project, they should always match.)
+//
+// In STREAMED mode, we can't manipulate the headers after a chunk of the body
+// has been delivered, and in this particular example, it's possible that the
+// request and response body chunks will be interleaved. So, we can't add the
+// hash of the response body to the response headers, and we can't add the hash of
+// the request body to the response headers either, since the response headers
+// might be transmitted before the entire request body. (Try it with a big
+// message and see!)
+func processEchoHashStreaming(stream extproc.ExternalProcessor_ProcessServer) error {
+	logger.Debug("processEchoHashStreaming")
 	// We already have the request headers, so first send back the request body
 	// message.
 	err := stream.Send(&extproc.ProcessingResponse{
@@ -364,7 +390,12 @@ func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error 
 	// or the response, but other than that everything will be interleaved.
 	// For that reason, we'll pull messages from the stream and react to
 	// whatever we get.
-	for {
+	requestBodyDone := false
+	responseBodyDone := false
+	requestHash := sha256.New()
+	responseHash := sha256.New()
+
+	for !requestBodyDone || !responseBodyDone {
 		msg, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -374,17 +405,21 @@ func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error 
 		}
 
 		if msg.GetRequestBody() != nil {
+			bod := msg.GetRequestBody()
 			logger.Debugf("Request body: %d bytes. End = %v",
-				len(msg.GetRequestBody().Body), msg.GetRequestBody().EndOfStream)
-			// TODO calculate checksum
+				len(bod.Body), bod.EndOfStream)
+			requestHash.Write(bod.Body)
+			requestBodyDone = bod.EndOfStream
 			stream.Send(&extproc.ProcessingResponse{
 				Response: &extproc.ProcessingResponse_RequestBody{},
 			})
 
 		} else if msg.GetResponseBody() != nil {
+			bod := msg.GetResponseBody()
 			logger.Debugf("Response body: %d bytes. End = %v",
-				len(msg.GetResponseBody().Body), msg.GetResponseBody().EndOfStream)
-			// TODO calculate checksum
+				len(bod.Body), bod.EndOfStream)
+			responseHash.Write(bod.Body)
+			responseBodyDone = bod.EndOfStream
 			stream.Send(&extproc.ProcessingResponse{
 				Response: &extproc.ProcessingResponse_ResponseBody{},
 			})
@@ -399,11 +434,14 @@ func processEchoStreaming(stream extproc.ExternalProcessor_ProcessServer) error 
 			logger.Debug("Got an unknown message")
 		}
 	}
+
+	logger.Infof("Request body hash:  %x", requestHash.Sum(nil))
+	logger.Infof("Response body hash: %x", responseHash.Sum(nil))
+	return nil
 }
 
-// This example generates a random key, encodes the body using base64,
-// and forwards the body to the "/echo" endpoint, which echoes it back. This
-// shows a way to do streaming.
+// This example base-64-encodes the HTTP response body. It does it using streaming
+// mode so it should work with a body of any size.
 func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 	logger.Debug("processEncodeDecode")
 	// We already have the request headers, so first send back the request body
@@ -421,14 +459,44 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 								},
 							},
 						},
-						RemoveHeaders: []string{"content-length"},
 					},
 				},
 			},
 		},
 		ModeOverride: &extproc_cfg.ProcessingMode{
-			RequestBodyMode: extproc_cfg.ProcessingMode_STREAMED,
-			//ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+			ResponseBodyMode: extproc_cfg.ProcessingMode_STREAMED,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	// We now expect the response headers.
+	msg, err := stream.Recv()
+	if err == io.EOF {
+		return nil
+	} else if err != nil {
+		logger.Warnf("Error receiving from stream: %v", err)
+		return err
+	}
+
+	if msg.GetResponseHeaders() == nil {
+		// Didn't expect this
+		return errors.New("Received unexpected response")
+	}
+
+	err = stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_ResponseHeaders{
+			ResponseHeaders: &extproc.HeadersResponse{
+				Response: &extproc.CommonResponse{
+					HeaderMutation: &extproc.HeaderMutation{
+						// Since we're going to modify the body chunks, we have to make sure
+						// that there is no content-length header present, since we'll be
+						// changing it!
+						RemoveHeaders: []string{"content-length"},
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -436,9 +504,10 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 	}
 
 	encBuf := &bytes.Buffer{}
-	encoder := base64.NewEncoder(base64.RawStdEncoding, encBuf)
+	encoder := base64.NewEncoder(base64.StdEncoding, encBuf)
+	bodyDone := false
 
-	for {
+	for !bodyDone {
 		msg, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -447,20 +516,20 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 			return err
 		}
 
-		if msg.GetRequestBody() != nil {
-			logger.Debugf("Request: Encode %d", len(msg.GetRequestBody().Body))
-			encoder.Write(msg.GetRequestBody().Body)
-			if msg.GetRequestBody().EndOfStream {
+		if msg.GetResponseBody() != nil {
+			bod := msg.GetResponseBody()
+			logger.Debugf("Request: Encode %d", len(bod.Body))
+			encoder.Write(bod.Body)
+			if bod.EndOfStream {
 				logger.Debugf("Request: EOF")
+				bodyDone = true
 				encoder.Close()
 			}
 			decoded := make([]byte, encBuf.Len())
 			encBuf.Read(decoded)
-			logger.Debugf("After read: %d", encBuf.Len())
-			logger.Debugf("Request: encoded = %d", len(decoded))
 			stream.Send(&extproc.ProcessingResponse{
-				Response: &extproc.ProcessingResponse_RequestBody{
-					RequestBody: &extproc.BodyResponse{
+				Response: &extproc.ProcessingResponse_ResponseBody{
+					ResponseBody: &extproc.BodyResponse{
 						Response: &extproc.CommonResponse{
 							BodyMutation: &extproc.BodyMutation{
 								Mutation: &extproc.BodyMutation_Body{
@@ -472,23 +541,12 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 				},
 			})
 
-		} else if msg.GetResponseBody() != nil {
-			logger.Debugf("Response body: %d bytes. End = %v",
-				len(msg.GetResponseBody().Body), msg.GetResponseBody().EndOfStream)
-			stream.Send(&extproc.ProcessingResponse{
-				Response: &extproc.ProcessingResponse_ResponseBody{},
-			})
-
-		} else if msg.GetResponseHeaders() != nil {
-			logger.Debug("Got response headers")
-			stream.Send(&extproc.ProcessingResponse{
-				Response: &extproc.ProcessingResponse_ResponseHeaders{},
-			})
-
 		} else {
 			logger.Debug("Got an unknown message")
 		}
 	}
+
+	return nil
 }
 
 // This function assembles an "immediate response" message, which will
