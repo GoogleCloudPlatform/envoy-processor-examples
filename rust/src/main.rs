@@ -1,8 +1,8 @@
-pub mod pb {
-  tonic::include_proto!("envoy.service.ext_proc.v3");
-}
-
-use {crate::service::ExampleProcessor, tonic::transport::Server};
+use {
+  crate::service::ExampleProcessor,
+  envoy_control_plane::envoy::service::ext_proc::v3::external_processor_server::ExternalProcessorServer,
+  tonic::transport::Server,
+};
 
 mod service;
 
@@ -12,9 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("Server listening on {}", addr);
   let server = ExampleProcessor {};
   Server::builder()
-    .add_service(pb::external_processor_server::ExternalProcessorServer::new(
-      server,
-    ))
+    .add_service(ExternalProcessorServer::new(server))
     .serve(addr)
     .await?;
   Ok(())

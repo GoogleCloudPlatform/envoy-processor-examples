@@ -1,6 +1,8 @@
 use {
+  envoy_control_plane::envoy::service::ext_proc::v3::{
+    external_processor_server::ExternalProcessor, ProcessingRequest, ProcessingResponse,
+  },
   futures::Stream,
-  crate::pb::{external_processor_server::ExternalProcessor, ProcessingRequest, ProcessingResponse},
   std::pin::Pin,
   tonic::{Request, Response, Status, Streaming},
 };
@@ -15,6 +17,13 @@ impl ExternalProcessor for ExampleProcessor {
     &self,
     request: Request<Streaming<ProcessingRequest>>,
   ) -> Result<Response<Self::ProcessStream>, Status> {
-    unimplemented!()
+    let mut req = request.into_inner();
+    if let Some(first_msg) = req.message().await? {
+      // TODO check the type and the path
+      // Depending on the path, dispatch to various other things.
+      unimplemented!()
+    }
+    // End of stream
+    Ok(Response::new(Box::pin(futures::stream::empty())))
   }
 }
