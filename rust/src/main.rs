@@ -8,7 +8,8 @@ mod service;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let addr = "127.0.0.1:11111".parse().unwrap();
+  // TODO use a command-line processing library here.
+  let addr = "127.0.0.1:10002".parse().unwrap();
   println!("Server listening on {}", addr);
   let server = ExampleProcessor {};
   Server::builder()
