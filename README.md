@@ -3,7 +3,7 @@
 This repository contains a set of examples for Envoy's 
 [External Processing Filter](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter). 
 
-In particular, "cmd/processor" contains a sample processor, written in Go, that exercises
+In particular, "go/cmd/processor" contains a sample processor, written in Go, that exercises
 most ofthe functionality of ext_proc, including:
 
 * Reading and validating header content
@@ -11,7 +11,7 @@ most ofthe functionality of ext_proc, including:
 * Reading the request body using several different streaming modes
 * Modifying the request body using the different streaming modes
 
-In addition, "cmd/httptarget" contains an HTTP server that can be used as an
+In addition, "go/cmd/httptarget" contains an HTTP server that can be used as an
 "upstream" server, along with a sample configuration that runs Envoy, the sample
 target, and the processor.
 
@@ -24,6 +24,7 @@ functionality.
 
 Build the HTTP target and run it in the background on port 10001:
 
+    cd go
     go build ./cmd/httptarget
     ./httptarget -p 10001 &
 
@@ -36,6 +37,7 @@ You can verify this using "curl":
 
 Build the external processing server and run it in the background on port 10002:
 
+    cd go
     go build ./cmd/processor
     ./processor -p 10002 &
 
