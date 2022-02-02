@@ -1,0 +1,12 @@
+[submodule "data-plane-api"]
+	path = data-plane-api
+	url = https://github.com/envoyproxy/data-plane-api.git
+[submodule "udpa"]
+	path = udpa
+	url = https://github.com/cncf/udpa.git
+[submodule "protoc-gen-validate"]
+	path = protoc-gen-validate
+	url = https://github.com/envoyproxy/protoc-gen-validate.git
+[submodule "xds"]
+	path = xds
+	url = https://github.com/cncf/xds.git
