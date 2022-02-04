@@ -1,17 +1,18 @@
 use {
+  crate::base64::Encoder,
   envoy_control_plane::envoy::{
     config::core::v3::{HeaderMap, HeaderValue, HeaderValueOption},
     extensions::filters::http::ext_proc::v3::{processing_mode, ProcessingMode},
     r#type::v3::HttpStatus,
     service::ext_proc::v3::{
-      external_processor_server::ExternalProcessor, processing_request, processing_response,
-      BodyResponse, CommonResponse, HeaderMutation, HeadersResponse, HttpBody, HttpHeaders,
-      ImmediateResponse, ProcessingRequest, ProcessingResponse,
+      body_mutation, external_processor_server::ExternalProcessor, processing_request,
+      processing_response, BodyMutation, BodyResponse, CommonResponse, HeaderMutation,
+      HeadersResponse, HttpBody, HttpHeaders, ImmediateResponse, ProcessingRequest,
+      ProcessingResponse,
     },
   },
   futures::{channel::mpsc::UnboundedSender, SinkExt, Stream},
-  std::pin::Pin,
-  std::str,
+  std::{pin::Pin, str},
   tonic::{Request, Response, Status, Streaming},
 };
 
@@ -42,6 +43,11 @@ impl ExternalProcessor for ExampleProcessor {
         Some("/checkJson") => {
           tokio::task::spawn(async move {
             handle_check_json(&req_headers, sender, stream).await;
+          });
+        }
+        Some("/echoencode") => {
+          tokio::task::spawn(async move {
+            handle_echo_encode(sender, stream).await;
           });
         }
         _ => sender.close_channel(),
@@ -172,6 +178,79 @@ async fn handle_check_json(
     sender.send(Ok(resp_headers_resp)).await.ok();
   }
   // Fall through if we get the wrong message.
+}
+
+// Encode the response in a streaming way into base64.
+async fn handle_echo_encode(
+  mut sender: UnboundedSender<Result<ProcessingResponse, Status>>,
+  mut stream: Streaming<ProcessingRequest>,
+) {
+  // Send back a response that changes the request URL for the HTTP target.
+  let mut req_headers_cr = CommonResponse::default();
+  add_set_header(&mut req_headers_cr, ":path", "/echo");
+  let req_headers_resp = ProcessingResponse {
+    response: Some(processing_response::Response::RequestHeaders(
+      HeadersResponse {
+        response: Some(req_headers_cr),
+      },
+    )),
+    mode_override: Some(ProcessingMode {
+      response_body_mode: processing_mode::BodySendMode::Streamed as i32,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  sender.send(Ok(req_headers_resp)).await.ok();
+
+  let mut encoder = Encoder::new();
+
+  // Loop to process messages, because we act on both response headers
+  // and also on each chunk of the body.
+  while let Ok(Some(next_msg)) = stream.message().await {
+    match next_msg.request {
+      Some(processing_request::Request::ResponseHeaders(_)) => {
+        let resp_headers_resp = ProcessingResponse {
+          // Be sure to change the path so that the HTTP target works,
+          // and clear content-length since it will change as we encode.
+          response: Some(processing_response::Response::ResponseHeaders(
+            HeadersResponse {
+              response: Some(CommonResponse {
+                header_mutation: Some(HeaderMutation {
+                  set_headers: vec![HeaderValueOption {
+                    header: Some(HeaderValue {
+                      key: ":path".into(),
+                      value: "/echo".into(),
+                    }),
+                    ..Default::default()
+                  }],
+                  remove_headers: vec!["content-length".into()],
+                }),
+                ..Default::default()
+              }),
+            },
+          )),
+          ..Default::default()
+        };
+        sender.send(Ok(resp_headers_resp)).await.ok();
+      }
+      Some(processing_request::Request::ResponseBody(chunk)) => {
+        let new_body = encoder.encode(&chunk.body, chunk.end_of_stream);
+        let resp_body_resp = ProcessingResponse {
+          response: Some(processing_response::Response::ResponseBody(BodyResponse {
+            response: Some(CommonResponse {
+              body_mutation: Some(BodyMutation {
+                mutation: Some(body_mutation::Mutation::Body(new_body.into())),
+              }),
+              ..Default::default()
+            }),
+          })),
+          ..Default::default()
+        };
+        sender.send(Ok(resp_body_resp)).await.ok();
+      }
+      _ => {}
+    }
+  }
 }
 
 async fn get_request_headers(stream: &mut Streaming<ProcessingRequest>) -> Option<HttpHeaders> {

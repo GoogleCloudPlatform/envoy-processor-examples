@@ -4,6 +4,7 @@ use {
   tonic::transport::Server,
 };
 
+mod base64;
 mod service;
 
 #[tokio::main]
