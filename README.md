@@ -3,8 +3,8 @@
 This repository contains a set of examples for Envoy's 
 [External Processing Filter](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter). 
 
-In particular, "go/cmd/processor" contains a sample processor, written in Go, that exercises
-most ofthe functionality of ext_proc, including:
+In particular, "go/cmd/processor" contains sample processor, written in Go and Rust,
+that exercise most of the functionality of ext_proc, including:
 
 * Reading and validating header content
 * Modifying request and response headers
@@ -33,13 +33,21 @@ You can verify this using "curl":
     curl 0:10001/hello
     Hello, World!
 
-### Build and Start the processor
+### Build and Start the Go processor
 
 Build the external processing server and run it in the background on port 10002:
 
     cd go
     go build ./cmd/processor
     ./processor -p 10002 &
+
+### Build and Start the Rust processor
+
+The rust version works in a similar way:
+
+    cd rust
+    cargo build --profile release
+    ./target/release/envoy-processor -p 10002 &ls targ
 
 ### Get Envoy
 
@@ -55,10 +63,10 @@ Run Envoy using the supplied configuration, which will:
 * Proxy all requests to the HTTP target at port 10001
 * Pass all requests through the processor for additional processing
 
-Assuming that "envoy-static" points to an Envoy executable in your environment,
+Assuming that "envoy" points to an Envoy executable in your environment,
 then run the following from this directory:
 
-    envoy-static -c envoy.yaml
+    envoy -c envoy.yaml
 
 ### Test the flow
 
