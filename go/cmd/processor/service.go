@@ -177,13 +177,13 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 }
 
 // This is a more sophisticated example that does a few things:
-// 1) It sets a request header to rewrite the path
-// 2) It checks the content-type header to see if it is JSON (or skips
-//    this check if there is no content
-// 3) If it is JSON, it changes the processing mode to get the request body
-// 4) If the content is JSON, validate the request body as JSON
-// 5) Return an error if the validation fails
-// 6) Or, add a response header to reflect the request validation status
+//  1. It sets a request header to rewrite the path
+//  2. It checks the content-type header to see if it is JSON (or skips
+//     this check if there is no content
+//  3. If it is JSON, it changes the processing mode to get the request body
+//  4. If the content is JSON, validate the request body as JSON
+//  5. Return an error if the validation fails
+//  6. Or, add a response header to reflect the request validation status
 //
 // Among other things, this example shows the ablility of an external processor
 // to decide how much of the request and response it needs to process based
@@ -316,7 +316,7 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 const newJSONMessage = `
 {
   "message": "Hello!",
-  "recipients": ["World"],
+  "recipients": ["World"]
 }
 `
 
