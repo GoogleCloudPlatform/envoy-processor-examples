@@ -77,6 +77,8 @@ func TestPosts(t *testing.T) {
 		{"CheckNotJSONButOK", "/checkJson", "text/plain", "Still not JSON", 200, "Still not JSON"},
 		{"EchoEncode", "/echoencode", "text/plain", encodeBody, 200, encodedBody},
 		{"EchoHashString", "/echohashstream", "text/plain", "Hash this!", 200, "Hash this!"},
+		{"EchoHashBuffered", "/echohashbuffered", "text/plain", "Hash this too!", 200, "Hash this too!"},
+		{"EchoHashBufferedPartial", "/echohashbufferedpartial", "text/plain", "Hash this too!", 200, "Hash this too!"},
 	}
 	for _, arg := range a {
 		t.Run(arg.name, func(t *testing.T) {

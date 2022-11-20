@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -62,6 +63,10 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 		return processAndJustLog(stream)
 	case "/echohashstream":
 		return processEchoHashStreaming(stream)
+	case "/echohashbuffered":
+		return processEchoHashBuffered(stream, extproc_cfg.ProcessingMode_BUFFERED)
+	case "/echohashbufferedpartial":
+		return processEchoHashBuffered(stream, extproc_cfg.ProcessingMode_BUFFERED_PARTIAL)
 	case "/echoencode":
 		return processEncodeDecode(stream)
 	case "/addHeader", "/testAddHeader":
@@ -483,6 +488,122 @@ func processEchoHashStreaming(stream extproc.ExternalProcessor_ProcessServer) er
 
 	logger.Infof("Request body hash:  %x", requestHash.Sum(nil))
 	logger.Infof("Response body hash: %x", responseHash.Sum(nil))
+	return nil
+}
+
+// This also hashes the request and response bodies, but it uses a buffered mode.
+// This holds the header until the entire request body is processed. This way, we
+// can add a response header that shows both the request and response hashes.
+// In BUFFERED mode, the request or response will fail if either is over Envoy's
+// buffered limit. In BUFFERED_PARTIAL mode, it won't fail, but won't add anything
+// to the response either.
+func processEchoHashBuffered(stream extproc.ExternalProcessor_ProcessServer,
+	mode extproc_cfg.ProcessingMode_BodySendMode) error {
+	logger.Debugf("processEchoHashBuffered. mode = %s", mode)
+	// We already have the request headers, so first send back the request body
+	// message.
+	logger.Debug("Setting target URL to /echo")
+	err := stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_RequestHeaders{
+			RequestHeaders: &extproc.HeadersResponse{
+				Response: &extproc.CommonResponse{
+					HeaderMutation: &extproc.HeaderMutation{
+						SetHeaders: []*core.HeaderValueOption{
+							{
+								Header: &core.HeaderValue{
+									Key:   ":path",
+									Value: "/echo",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		ModeOverride: &extproc_cfg.ProcessingMode{
+			RequestBodyMode:  mode,
+			ResponseBodyMode: mode,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Even in buffered mode, it's theoretically possible that we'll get
+	// the response body before the request body, so use a loop here just
+	// like in the (otherwise more complicated) streaming example.
+	requestBodyDone := false
+	responseBodyDone := false
+	requestHash := sha256.New()
+	responseHash := sha256.New()
+
+	for !requestBodyDone || !responseBodyDone {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			logger.Warnf("Error receiving from stream: %v", err)
+			return err
+		}
+
+		if msg.GetRequestBody() != nil {
+			bod := msg.GetRequestBody()
+			logger.Debugf("Request body: %d bytes. End = %v",
+				len(bod.Body), bod.EndOfStream)
+			if !bod.EndOfStream {
+				logger.Warn("Expected to receive a buffered request body")
+				return nil
+			}
+			requestHash.Write(bod.Body)
+			requestBodyDone = true
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_RequestBody{},
+			})
+
+		} else if msg.GetResponseBody() != nil {
+			bod := msg.GetResponseBody()
+			logger.Debugf("Response body: %d bytes. End = %v",
+				len(bod.Body), bod.EndOfStream)
+			if !bod.EndOfStream {
+				logger.Warn("Expected to receive a buffered response body")
+				return nil
+			}
+			responseHash.Write(bod.Body)
+			responseBodyDone = true
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseBody{
+					ResponseBody: &extproc.BodyResponse{Response: &extproc.CommonResponse{
+						HeaderMutation: &extproc.HeaderMutation{
+							SetHeaders: []*core.HeaderValueOption{
+								{
+									Header: &core.HeaderValue{
+										Key:   "x-request-body-hash",
+										Value: hex.EncodeToString(requestHash.Sum(nil)),
+									},
+								},
+								{
+									Header: &core.HeaderValue{
+										Key:   "x-response-body-hash",
+										Value: hex.EncodeToString(responseHash.Sum(nil)),
+									},
+								},
+							},
+						},
+					}},
+				},
+			})
+
+		} else if msg.GetResponseHeaders() != nil {
+			logger.Debug("Got response headers")
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseHeaders{},
+			})
+
+		} else {
+			logger.Debug("Got an unknown message")
+		}
+	}
+
 	return nil
 }
 
