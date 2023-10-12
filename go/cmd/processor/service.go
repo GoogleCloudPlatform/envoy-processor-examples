@@ -146,8 +146,8 @@ func processNotFound(stream extproc.ExternalProcessor_ProcessServer) error {
 					SetHeaders: []*core.HeaderValueOption{
 						{
 							Header: &core.HeaderValue{
-								Key:   "content-type",
-								Value: "text/plain",
+								Key:      "content-type",
+								RawValue: []byte("text/plain"),
 							},
 						},
 					},
@@ -175,8 +175,8 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/hello",
+									Key:      ":path",
+									RawValue: []byte("/hello"),
 								},
 							},
 						},
@@ -212,8 +212,8 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   "x-external-processor-status",
-									Value: "We were here",
+									Key:      "x-external-processor-status",
+									RawValue: []byte("We were here"),
 								},
 							},
 						},
@@ -249,8 +249,8 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -265,6 +265,7 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 	logger.Debugf("Checking content-type %s to see if it is JSON", contentType)
 	contentIsJSON := !requestHeaders.EndOfStream && contentTypeJSON.MatchString(contentType)
 	if contentIsJSON {
+		logger.Debug("Requesting buffered request body")
 		requestHeadersResponse.ModeOverride = &extproc_cfg.ProcessingMode{
 			RequestBodyMode: extproc_cfg.ProcessingMode_BUFFERED,
 		}
@@ -306,8 +307,8 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   "content-type",
-									Value: "text/plain",
+									Key:      "content-type",
+									RawValue: []byte("text/plain"),
 								},
 							},
 						},
@@ -350,8 +351,8 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   "x-json-status",
-									Value: jsonStatus,
+									Key:      "x-json-status",
+									RawValue: []byte(jsonStatus),
 								},
 							},
 						},
@@ -419,8 +420,8 @@ func processEchoHashStreaming(stream extproc.ExternalProcessor_ProcessServer) er
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -511,8 +512,8 @@ func processEchoHashBuffered(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -577,14 +578,14 @@ func processEchoHashBuffered(stream extproc.ExternalProcessor_ProcessServer,
 							SetHeaders: []*core.HeaderValueOption{
 								{
 									Header: &core.HeaderValue{
-										Key:   "x-request-body-hash",
-										Value: hex.EncodeToString(requestHash.Sum(nil)),
+										Key:      "x-request-body-hash",
+										RawValue: []byte(hex.EncodeToString(requestHash.Sum(nil))),
 									},
 								},
 								{
 									Header: &core.HeaderValue{
-										Key:   "x-response-body-hash",
-										Value: hex.EncodeToString(responseHash.Sum(nil)),
+										Key:      "x-response-body-hash",
+										RawValue: []byte(hex.EncodeToString(responseHash.Sum(nil))),
 									},
 								},
 							},
@@ -621,8 +622,8 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -741,8 +742,8 @@ func sendImmediateResponse(stream extproc.ExternalProcessor_ProcessServer,
 func setHeader(mutation *extproc.HeaderMutation, name, value string) {
 	mutation.SetHeaders = append(mutation.SetHeaders, &core.HeaderValueOption{
 		Header: &core.HeaderValue{
-			Key:   name,
-			Value: value,
+			Key:      name,
+			RawValue: []byte(value),
 		},
 	})
 }

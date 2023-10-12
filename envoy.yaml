@@ -42,6 +42,7 @@ static_resources:
           - name: envoy.filters.http.ext_proc
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+              allow_mode_override: true
               message_timeout:
                 seconds: 2
               grpc_service:
