@@ -117,6 +117,24 @@ with the "-d" (debug) flag enabled to see the messages coming in. For example:
 
     curl 0:10000/echohashstream -X POST -T <some big file> > /dev/null
 
+### POST /echohashbuffered
+
+This is the same as /echohashstream, except that it uses a "buffered" processing
+mode. This way, the processor can add two parameters to the HTTP response that include
+the hash of the request and response bodies. (When used with the supplied "httptarget",
+since this uses the "/echo" endpoint, both should be the same.)
+
+Since this mode uses Envoy's built-in buffering mechanism, Envoy will return a 413
+error if the request body is larger than Envoy's (configurable) buffer size.
+
+### POST /echohashbufferedpartial
+
+This is the same as /echohashbuffered, but it uses the "partial buffering" scheme.
+This way, there will never be an error if the request body is too large. However, if
+the request body is larger than Envoy's buffer size, then the processor will continue
+without calculating any hashes. The result is that bodies smaller than the buffer size
+will have the additional response headers added, and larger bodies will not.
+
 ### POST /echoencode
 
 Echo back the request body, but base64-encode the response. The processor does

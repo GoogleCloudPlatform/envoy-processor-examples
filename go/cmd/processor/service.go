@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -44,6 +45,7 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 		return err
 	}
 
+	logger.Debug("First message: %b", msg)
 	headers := msg.GetRequestHeaders()
 	if headers == nil {
 		logger.Warn("Expecting request headers message first")
@@ -55,18 +57,19 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 	logger.Debugf("Received request headers for %s", path)
 
 	switch path {
-	case "/echo":
-	case "/help":
-	case "/hello":
-	case "/json":
+	case "/echo", "/help", "/hello", "/json":
 		// Pass through the basic ones so that the test target works as designed.
 		// Just close the stream, which indicates "no more processing"
-		return nil
+		return processAndJustLog(stream)
 	case "/echohashstream":
 		return processEchoHashStreaming(stream)
+	case "/echohashbuffered":
+		return processEchoHashBuffered(stream, extproc_cfg.ProcessingMode_BUFFERED)
+	case "/echohashbufferedpartial":
+		return processEchoHashBuffered(stream, extproc_cfg.ProcessingMode_BUFFERED_PARTIAL)
 	case "/echoencode":
 		return processEncodeDecode(stream)
-	case "/addHeader":
+	case "/addHeader", "/testAddHeader":
 		return processAddHeader(stream)
 	case "/checkJson":
 		return processCheckJSON(stream, headers)
@@ -80,6 +83,49 @@ func (s *processorService) Process(stream extproc.ExternalProcessor_ProcessServe
 	return nil
 }
 
+// Just log what ext_proc sends us
+func processAndJustLog(stream extproc.ExternalProcessor_ProcessServer) error {
+	response := &extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_RequestHeaders{},
+	}
+	stream.Send(response)
+
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			logger.Debug("EOF")
+			return nil
+		} else if err != nil {
+			logger.Debugf("Error on stream: %v", err)
+			return err
+		}
+
+		response = &extproc.ProcessingResponse{}
+
+		if msg.GetRequestBody() != nil {
+			logger.Debug("Got request body")
+			response.Response = &extproc.ProcessingResponse_RequestBody{}
+		} else if msg.GetRequestTrailers() != nil {
+			logger.Debug("Got request trailers")
+			response.Response = &extproc.ProcessingResponse_RequestTrailers{}
+		} else if msg.GetResponseHeaders() != nil {
+			logger.Debug("Got response headers")
+			response.Response = &extproc.ProcessingResponse_ResponseHeaders{}
+		} else if msg.GetResponseBody() != nil {
+			logger.Debug("Got response body")
+			response.Response = &extproc.ProcessingResponse_ResponseBody{}
+		} else if msg.GetResponseTrailers() != nil {
+			logger.Debug("Got response trailers")
+			response.Response = &extproc.ProcessingResponse_ResponseTrailers{}
+		} else {
+			logger.Debug("Got a totally unrecognized message!")
+			return nil
+		}
+
+		stream.Send(response)
+	}
+}
+
 // Show how to return an error by returning a 404 in response to the "/notfound"
 // path.
 func processNotFound(stream extproc.ExternalProcessor_ProcessServer) error {
@@ -89,6 +135,7 @@ func processNotFound(stream extproc.ExternalProcessor_ProcessServer) error {
 	// * a content-type header of "text/plain"
 	// * a body that says "Not found"
 	// * an additional message that may be logged by envoy
+	logger.Debug("Sending back immediate 404 response")
 	response := &extproc.ProcessingResponse{
 		Response: &extproc.ProcessingResponse_ImmediateResponse{
 			ImmediateResponse: &extproc.ImmediateResponse{
@@ -99,8 +146,8 @@ func processNotFound(stream extproc.ExternalProcessor_ProcessServer) error {
 					SetHeaders: []*core.HeaderValueOption{
 						{
 							Header: &core.HeaderValue{
-								Key:   "content-type",
-								Value: "text/plain",
+								Key:      "content-type",
+								RawValue: []byte("text/plain"),
 							},
 						},
 					},
@@ -119,6 +166,7 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 	// Change the path to "/hello" because that's one of the paths that the target
 	// server understands. (Sadly, go syntax and the way that it handles "oneof"
 	// messages means a lot of boilerplate here!)
+	logger.Debug("Redirecting target URL to /hello")
 	err := stream.Send(&extproc.ProcessingResponse{
 		Response: &extproc.ProcessingResponse_RequestHeaders{
 			RequestHeaders: &extproc.HeadersResponse{
@@ -127,8 +175,8 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/hello",
+									Key:      ":path",
+									RawValue: []byte("/hello"),
 								},
 							},
 						},
@@ -153,6 +201,7 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 		logger.Error("Expecting response headers as the next message")
 		return nil
 	}
+	logger.Debug("Got response headers and sending response")
 
 	// Send back a response that adds a header
 	response := &extproc.ProcessingResponse{
@@ -163,8 +212,8 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   "x-external-processor-status",
-									Value: "We were here",
+									Key:      "x-external-processor-status",
+									RawValue: []byte("We were here"),
 								},
 							},
 						},
@@ -177,13 +226,13 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 }
 
 // This is a more sophisticated example that does a few things:
-// 1) It sets a request header to rewrite the path
-// 2) It checks the content-type header to see if it is JSON (or skips
-//    this check if there is no content
-// 3) If it is JSON, it changes the processing mode to get the request body
-// 4) If the content is JSON, validate the request body as JSON
-// 5) Return an error if the validation fails
-// 6) Or, add a response header to reflect the request validation status
+//  1. It sets a request header to rewrite the path
+//  2. It checks the content-type header to see if it is JSON (or skips
+//     this check if there is no content
+//  3. If it is JSON, it changes the processing mode to get the request body
+//  4. If the content is JSON, validate the request body as JSON
+//  5. Return an error if the validation fails
+//  6. Or, add a response header to reflect the request validation status
 //
 // Among other things, this example shows the ablility of an external processor
 // to decide how much of the request and response it needs to process based
@@ -191,6 +240,7 @@ func processAddHeader(stream extproc.ExternalProcessor_ProcessServer) error {
 func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 	requestHeaders *extproc.HttpHeaders) error {
 	// Set the path to "/echo" to get the right functionality on the target.
+	logger.Debug("Setting target URL to /echo")
 	requestHeadersResponse := &extproc.ProcessingResponse{
 		Response: &extproc.ProcessingResponse_RequestHeaders{
 			RequestHeaders: &extproc.HeadersResponse{
@@ -199,8 +249,8 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -215,6 +265,7 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 	logger.Debugf("Checking content-type %s to see if it is JSON", contentType)
 	contentIsJSON := !requestHeaders.EndOfStream && contentTypeJSON.MatchString(contentType)
 	if contentIsJSON {
+		logger.Debug("Requesting buffered request body")
 		requestHeadersResponse.ModeOverride = &extproc_cfg.ProcessingMode{
 			RequestBodyMode: extproc_cfg.ProcessingMode_BUFFERED,
 		}
@@ -256,8 +307,8 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   "content-type",
-									Value: "text/plain",
+									Key:      "content-type",
+									RawValue: []byte("text/plain"),
 								},
 							},
 						},
@@ -300,8 +351,8 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   "x-json-status",
-									Value: jsonStatus,
+									Key:      "x-json-status",
+									RawValue: []byte(jsonStatus),
 								},
 							},
 						},
@@ -316,7 +367,7 @@ func processCheckJSON(stream extproc.ExternalProcessor_ProcessServer,
 const newJSONMessage = `
 {
   "message": "Hello!",
-  "recipients": ["World"],
+  "recipients": ["World"]
 }
 `
 
@@ -360,6 +411,7 @@ func processEchoHashStreaming(stream extproc.ExternalProcessor_ProcessServer) er
 	logger.Debug("processEchoHashStreaming")
 	// We already have the request headers, so first send back the request body
 	// message.
+	logger.Debug("Setting target URL to /echo")
 	err := stream.Send(&extproc.ProcessingResponse{
 		Response: &extproc.ProcessingResponse_RequestHeaders{
 			RequestHeaders: &extproc.HeadersResponse{
@@ -368,8 +420,8 @@ func processEchoHashStreaming(stream extproc.ExternalProcessor_ProcessServer) er
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -440,10 +492,126 @@ func processEchoHashStreaming(stream extproc.ExternalProcessor_ProcessServer) er
 	return nil
 }
 
+// This also hashes the request and response bodies, but it uses a buffered mode.
+// This holds the header until the entire request body is processed. This way, we
+// can add a response header that shows both the request and response hashes.
+// In BUFFERED mode, the request or response will fail if either is over Envoy's
+// buffered limit. In BUFFERED_PARTIAL mode, it won't fail, but won't add anything
+// to the response either.
+func processEchoHashBuffered(stream extproc.ExternalProcessor_ProcessServer,
+	mode extproc_cfg.ProcessingMode_BodySendMode) error {
+	logger.Debugf("processEchoHashBuffered. mode = %s", mode)
+	// We already have the request headers, so first send back the request body
+	// message.
+	logger.Debug("Setting target URL to /echo")
+	err := stream.Send(&extproc.ProcessingResponse{
+		Response: &extproc.ProcessingResponse_RequestHeaders{
+			RequestHeaders: &extproc.HeadersResponse{
+				Response: &extproc.CommonResponse{
+					HeaderMutation: &extproc.HeaderMutation{
+						SetHeaders: []*core.HeaderValueOption{
+							{
+								Header: &core.HeaderValue{
+									Key:      ":path",
+									RawValue: []byte("/echo"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		ModeOverride: &extproc_cfg.ProcessingMode{
+			RequestBodyMode:  mode,
+			ResponseBodyMode: mode,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Even in buffered mode, it's theoretically possible that we'll get
+	// the response body before the request body, so use a loop here just
+	// like in the (otherwise more complicated) streaming example.
+	requestBodyDone := false
+	responseBodyDone := false
+	requestHash := sha256.New()
+	responseHash := sha256.New()
+
+	for !requestBodyDone || !responseBodyDone {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			logger.Warnf("Error receiving from stream: %v", err)
+			return err
+		}
+
+		if msg.GetRequestBody() != nil {
+			bod := msg.GetRequestBody()
+			logger.Debugf("Request body: %d bytes. End = %v",
+				len(bod.Body), bod.EndOfStream)
+			if !bod.EndOfStream {
+				logger.Warn("Expected to receive a buffered request body")
+				return nil
+			}
+			requestHash.Write(bod.Body)
+			requestBodyDone = true
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_RequestBody{},
+			})
+
+		} else if msg.GetResponseBody() != nil {
+			bod := msg.GetResponseBody()
+			logger.Debugf("Response body: %d bytes. End = %v",
+				len(bod.Body), bod.EndOfStream)
+			if !bod.EndOfStream {
+				logger.Warn("Expected to receive a buffered response body")
+				return nil
+			}
+			responseHash.Write(bod.Body)
+			responseBodyDone = true
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseBody{
+					ResponseBody: &extproc.BodyResponse{Response: &extproc.CommonResponse{
+						HeaderMutation: &extproc.HeaderMutation{
+							SetHeaders: []*core.HeaderValueOption{
+								{
+									Header: &core.HeaderValue{
+										Key:      "x-request-body-hash",
+										RawValue: []byte(hex.EncodeToString(requestHash.Sum(nil))),
+									},
+								},
+								{
+									Header: &core.HeaderValue{
+										Key:      "x-response-body-hash",
+										RawValue: []byte(hex.EncodeToString(responseHash.Sum(nil))),
+									},
+								},
+							},
+						},
+					}},
+				},
+			})
+
+		} else if msg.GetResponseHeaders() != nil {
+			logger.Debug("Got response headers")
+			stream.Send(&extproc.ProcessingResponse{
+				Response: &extproc.ProcessingResponse_ResponseHeaders{},
+			})
+
+		} else {
+			logger.Debug("Got an unknown message")
+		}
+	}
+
+	return nil
+}
+
 // This example base-64-encodes the HTTP response body. It does it using streaming
 // mode so it should work with a body of any size.
 func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
-	logger.Debug("processEncodeDecode")
+	logger.Debug("Setting target URL to /echo")
 	// We already have the request headers, so first send back the request body
 	// message.
 	err := stream.Send(&extproc.ProcessingResponse{
@@ -454,8 +622,8 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 						SetHeaders: []*core.HeaderValueOption{
 							{
 								Header: &core.HeaderValue{
-									Key:   ":path",
-									Value: "/echo",
+									Key:      ":path",
+									RawValue: []byte("/echo"),
 								},
 							},
 						},
@@ -484,6 +652,7 @@ func processEncodeDecode(stream extproc.ExternalProcessor_ProcessServer) error {
 		// Didn't expect this
 		return errors.New("Received unexpected response")
 	}
+	logger.Debug("Got response headers and removing content-length")
 
 	err = stream.Send(&extproc.ProcessingResponse{
 		Response: &extproc.ProcessingResponse_ResponseHeaders{
@@ -573,8 +742,8 @@ func sendImmediateResponse(stream extproc.ExternalProcessor_ProcessServer,
 func setHeader(mutation *extproc.HeaderMutation, name, value string) {
 	mutation.SetHeaders = append(mutation.SetHeaders, &core.HeaderValueOption{
 		Header: &core.HeaderValue{
-			Key:   name,
-			Value: value,
+			Key:      name,
+			RawValue: []byte(value),
 		},
 	})
 }
@@ -587,7 +756,11 @@ func setHeader(mutation *extproc.HeaderMutation, name, value string) {
 func getHeaderValue(headers *core.HeaderMap, name string) string {
 	for _, h := range headers.Headers {
 		if h.Key == name {
-			return h.Value
+			// Support backward compatibility with old Envoy versions
+			if h.RawValue == nil {
+				return h.Value
+			}
+			return string(h.RawValue)
 		}
 	}
 	return ""
