@@ -755,7 +755,11 @@ func setHeader(mutation *extproc.HeaderMutation, name, value string) {
 func getHeaderValue(headers *core.HeaderMap, name string) string {
 	for _, h := range headers.Headers {
 		if h.Key == name {
-			return h.Value
+			// Support backward compatibility with old Envoy versions
+			if h.RawValue == nil {
+				return h.Value
+			}
+			return string(h.RawValue)
 		}
 	}
 	return ""
