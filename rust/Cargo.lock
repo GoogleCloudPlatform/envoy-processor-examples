@@ -312,9 +312,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.11"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9f1f717ddc7b2ba36df7e871fd88db79326551d3d6f1fc406fbfd28b582ff8e"
+checksum = "91fc23aa11be92976ef4729127f1a74adf36d8436f7816b185d18df956790833"
 dependencies = [
  "bytes",
  "fnv",
@@ -325,7 +325,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util 0.6.9",
+ "tokio-util",
  "tracing",
 ]
 
@@ -914,20 +914,6 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e99e1983e5d376cd8eb4b66604d2e99e79f5bd988c3055891dcd8c9e2604cc0"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "log",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
-name = "tokio-util"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb2e075f03b3d66d8d8785356224ba688d2906a371015e225beeb65ca92c740"
@@ -964,7 +950,7 @@ dependencies = [
  "prost-derive",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.4",
+ "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",
@@ -999,7 +985,7 @@ dependencies = [
  "rand",
  "slab",
  "tokio",
- "tokio-util 0.7.4",
+ "tokio-util",
  "tower-layer",
  "tower-service",
  "tracing",
