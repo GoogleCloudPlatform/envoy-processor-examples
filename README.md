@@ -171,3 +171,9 @@ This will respond with a generic JSON message.
 ### GET /notfound
 
 Just return a 404.
+
+# License
+
+All recipes and samples within this repository are provided under the
+[Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) license. Please see
+the [LICENSE](/LICENSE) file for more detailed terms and conditions.
