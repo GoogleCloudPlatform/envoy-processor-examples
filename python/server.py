@@ -20,7 +20,7 @@ from grpc import ServicerContext
 logger = logging.getLogger()
 logger.setLevel("INFO")
 
-EXT_PROC_PORT = 443
+EXT_PROC_PORT = 50051
 HEALTH_CHECK_PORT = 80
 
 def get_response():
