@@ -4,18 +4,24 @@
 Client sends a stream of requests and Server responds with a stream of responses
 """
 from concurrent import futures
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import logging
 
 import grpc
 
 import service_pb2
 import service_pb2_grpc
+
+import _credentials
+
 from typing import Iterator
 from grpc import ServicerContext
 
 logger = logging.getLogger()
 logger.setLevel("INFO")
 
+EXT_PROC_PORT = 443
+HEALTH_CHECK_PORT = 80
 
 def get_response():
     header_mutation = service_pb2.HeaderMutation(
@@ -49,20 +55,39 @@ class TrafficExtensionCallout(service_pb2_grpc.ExternalProcessorServicer):
     ) -> Iterator[service_pb2.ProcessingResponse]:
         for request in request_iterator:
             print(request)
-            response = get_response()
-            yield response
+            yield get_response()
+
+
+class HealthCheckServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
 
 
 def serve():
-    port = "50051"
+    health_server = HTTPServer(("0.0.0.0", HEALTH_CHECK_PORT), HealthCheckServer)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
     service_pb2_grpc.add_ExternalProcessorServicer_to_server(
         TrafficExtensionCallout(), server
     )
-    server.add_insecure_port("[::]:" + port)
+    server_credentials = grpc.ssl_server_credentials(
+        (
+            (
+                _credentials.SERVER_CERTIFICATE_KEY,
+                _credentials.SERVER_CERTIFICATE,
+            ),
+        )
+    )
+    server.add_secure_port("0.0.0.0:%d" % EXT_PROC_PORT, server_credentials)
     server.start()
-    print("Server started, listening on " + port)
-    server.wait_for_termination()
+    print("Server started, listening on %d" % EXT_PROC_PORT)
+    try:
+        health_server.serve_forever()
+    except KeyboardInterrupt:
+        print("Server interrupted")
+    finally:
+        server.stop()
+        health_server.server_close()
 
 
 if __name__ == "__main__":
