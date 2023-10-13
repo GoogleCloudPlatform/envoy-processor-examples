@@ -3,4 +3,4 @@ WORKDIR /home/callouts
 COPY * ./
 RUN apt-get update && apt-get install -y python3-grpc-tools
 EXPOSE 50051
-ENTRYPOINT ["python3 server.py"]
+CMD [ "/usr/bin/python3", "server.py" ]
