@@ -11,64 +11,114 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-# Header Manipulation - Example Server
 
-Description: When a client sends a stream of gRPC requests, the server responds
-with a stream of responses. In this example, the server responds to the client
-with an example header to add to the request. The header will be named "hello"
-and will have the value "ext-proc".
+"""
+# Example external processing server
+----
+This server does two things:
+ When it gets request_headers, it replaces the Host header with service-extensions.com
+  and resets the path to /.
+ When it gets response_headers, it adds a "hello: service-extensions" response header.
 """
 from concurrent import futures
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import logging
 
-# [START serviceextension_add_header]
 import grpc
+
 import service_pb2
 import service_pb2_grpc
+
+import _credentials
+
 from typing import Iterator
+from grpc import ServicerContext
 
+logger = logging.getLogger()
+logger.setLevel("INFO")
 
-class CalloutExample(service_pb2_grpc.ExternalProcessorServicer):
+EXT_PROC_SECURE_PORT = 443
+EXT_PROC_INSECURE_PORT = 8080
+HEALTH_CHECK_PORT = 80
+
+class CalloutProcessor(service_pb2_grpc.ExternalProcessorServicer):
     def Process(
         self,
         request_iterator: Iterator[service_pb2.ProcessingRequest],
-        context: grpc.ServicerContext,
+        context: ServicerContext,
     ) -> Iterator[service_pb2.ProcessingResponse]:
         for request in request_iterator:
-            # TODO(Developer): Process the input request & prepare a response
-            # Add header `hello: ext-proc`
-            header_mutation = service_pb2.HeaderMutation(
-                set_headers=list(
-                    [
-                        service_pb2.HeaderValueOption(
-                            header=service_pb2.HeaderValue(
-                                key="hello", value="ext-proc"
-                            )
-                        )
-                    ]
-                )
-            )
-            response = service_pb2.ProcessingResponse(
-                request_headers=service_pb2.HeadersResponse(
+            print(request)
+            if request.HasField("response_headers"):
+                response_header_mutation = service_pb2.HeadersResponse(
                     response=service_pb2.CommonResponse(
-                        status=service_pb2.CommonResponse.ResponseStatus.CONTINUE_AND_REPLACE,
-                        header_mutation=header_mutation,
+                        header_mutation=service_pb2.HeaderMutation(
+                            set_headers=list(
+                                [
+                                    service_pb2.HeaderValueOption(
+                                        header=service_pb2.HeaderValue(key="hello", raw_value=bytes("service-extensions", "utf-8"))
+                                    ),
+                                ]
+                            ),
+                        ),
                     )
                 )
-            )
-            # Client is expected to send a stream of request
-            yield response
+                yield service_pb2.ProcessingResponse(response_headers=response_header_mutation)
+            elif request.HasField("request_headers"):
+                request_header_mutation = service_pb2.HeadersResponse(
+                    response=service_pb2.CommonResponse(
+                        header_mutation=service_pb2.HeaderMutation(
+                            set_headers=list(
+                                [
+                                    # rewrite the host to service-extensions.com and reset the path to /
+                                    service_pb2.HeaderValueOption(
+                                        header=service_pb2.HeaderValue(key="host", raw_value=bytes("service-extensions.com", "utf-8"))
+                                    ),
+                                    service_pb2.HeaderValueOption(
+                                        header=service_pb2.HeaderValue(key=":path", raw_value=bytes("/", "utf-8"))
+                                    ),
+                                ]
+                            ),
+                        ),
+                        # This must be set to true to make Envoys recompute the route for RouteExtensions
+                        clear_route_cache=True,
+                    )
+                )
+                yield service_pb2.ProcessingResponse(request_headers=request_header_mutation)
+
+class HealthCheckServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
 
 
-# [END serviceextension_add_header]
-def serve(port="50051"):
+def serve():
+    health_server = HTTPServer(("0.0.0.0", HEALTH_CHECK_PORT), HealthCheckServer)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
-    service_pb2_grpc.add_ExternalProcessorServicer_to_server(CalloutExample(), server)
-    server.add_insecure_port("[::]:" + port)
+    service_pb2_grpc.add_ExternalProcessorServicer_to_server(
+        CalloutProcessor(), server
+    )
+    server_credentials = grpc.ssl_server_credentials(
+        (
+            (
+                _credentials.SERVER_CERTIFICATE_KEY,
+                _credentials.SERVER_CERTIFICATE,
+            ),
+        )
+    )
+    server.add_secure_port("0.0.0.0:%d" % EXT_PROC_SECURE_PORT, server_credentials)
+    server.add_insecure_port("0.0.0.0:%d" % EXT_PROC_INSECURE_PORT)
     server.start()
-    print("Server started, listening on " + port)
-    server.wait_for_termination()
+    print("Server started, listening on %d and %d" % (EXT_PROC_SECURE_PORT, EXT_PROC_INSECURE_PORT))
+    try:
+        health_server.serve_forever()
+    except KeyboardInterrupt:
+        print("Server interrupted")
+    finally:
+        server.stop()
+        health_server.server_close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig()
     serve()
