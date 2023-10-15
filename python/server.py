@@ -31,15 +31,35 @@ import service_pb2_grpc
 
 import _credentials
 
-from typing import Iterator
+from typing import Iterator, List
 from grpc import ServicerContext
 
 logger = logging.getLogger()
 logger.setLevel("INFO")
 
+# Backend services on GCE VMs, GKE and hybrid use this port.
 EXT_PROC_SECURE_PORT = 443
+# Backend services on Cloud Run use this port.
 EXT_PROC_INSECURE_PORT = 8080
+# Cloud health checks use this port.
 HEALTH_CHECK_PORT = 80
+
+# Returns an ext_proc HeadersResponse for adding a list of headers.
+# clear_route_cache should be set to influence service selection for route
+# extensions.
+def add_headers_mutation(headers: List[tuple[str, str]], clear_route_cache: bool = False) -> service_pb2.HeadersResponse:
+    response_header_mutation = service_pb2.HeadersResponse()
+    response_header_mutation.response.header_mutation.add().set_headers(
+        [
+            service_pb2.HeaderValueOption(
+                header=service_pb2.HeaderValue(key=k, raw_value=bytes(v, "utf-8"))
+            ) for k, v in headers
+        ]
+    )
+    if clear_route_cache:
+        response_header_mutation.response.clear_route_cache = True
+    return response_header_mutation
+
 
 class CalloutProcessor(service_pb2_grpc.ExternalProcessorServicer):
     def Process(
@@ -50,40 +70,13 @@ class CalloutProcessor(service_pb2_grpc.ExternalProcessorServicer):
         for request in request_iterator:
             print(request)
             if request.HasField("response_headers"):
-                response_header_mutation = service_pb2.HeadersResponse(
-                    response=service_pb2.CommonResponse(
-                        header_mutation=service_pb2.HeaderMutation(
-                            set_headers=list(
-                                [
-                                    service_pb2.HeaderValueOption(
-                                        header=service_pb2.HeaderValue(key="hello", raw_value=bytes("service-extensions", "utf-8"))
-                                    ),
-                                ]
-                            ),
-                        ),
-                    )
-                )
+                response_header_mutation = add_headers_mutation([("hello", "service-extensions")])
                 yield service_pb2.ProcessingResponse(response_headers=response_header_mutation)
             elif request.HasField("request_headers"):
-                request_header_mutation = service_pb2.HeadersResponse(
-                    response=service_pb2.CommonResponse(
-                        header_mutation=service_pb2.HeaderMutation(
-                            set_headers=list(
-                                [
-                                    # rewrite the host to service-extensions.com and reset the path to /
-                                    service_pb2.HeaderValueOption(
-                                        header=service_pb2.HeaderValue(key="host", raw_value=bytes("service-extensions.com", "utf-8"))
-                                    ),
-                                    service_pb2.HeaderValueOption(
-                                        header=service_pb2.HeaderValue(key=":path", raw_value=bytes("/", "utf-8"))
-                                    ),
-                                ]
-                            ),
-                        ),
-                        # This must be set to true to make Envoys recompute the route for RouteExtensions
-                        clear_route_cache=True,
-                    )
-                )
+                request_header_mutation = add_headers_mutation([
+                    ("host", "service-extensions.com"),
+                    (":path", "/")
+                ], clear_route_cache=True)
                 yield service_pb2.ProcessingResponse(request_headers=request_header_mutation)
 
 class HealthCheckServer(BaseHTTPRequestHandler):
