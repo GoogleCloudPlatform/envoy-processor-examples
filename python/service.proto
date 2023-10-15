@@ -43,10 +43,6 @@ service ExternalProcessor {
   // protocol is described by the ProcessingRequest and ProcessingResponse
   // messages below.
   rpc Process(stream ProcessingRequest) returns (stream ProcessingResponse) {}
-  // TODO(sampath): Clean-up Below RPCs
-  rpc ProcessSimple(ProcessingRequest) returns (ProcessingResponse) {}
-  rpc ProcessSimple1(stream ProcessingRequest) returns (ProcessingResponse) {}
-  rpc ProcessSimple2(ProcessingRequest) returns (stream ProcessingResponse) {}
 }
 
 // This represents the different types of messages that Envoy can send

@@ -45,21 +45,6 @@ class ExternalProcessorStub(object):
         request_serializer=service__pb2.ProcessingRequest.SerializeToString,
         response_deserializer=service__pb2.ProcessingResponse.FromString,
         )
-    self.ProcessSimple = channel.unary_unary(
-        '/envoy.service.ext_proc.v3.ExternalProcessor/ProcessSimple',
-        request_serializer=service__pb2.ProcessingRequest.SerializeToString,
-        response_deserializer=service__pb2.ProcessingResponse.FromString,
-        )
-    self.ProcessSimple1 = channel.stream_unary(
-        '/envoy.service.ext_proc.v3.ExternalProcessor/ProcessSimple1',
-        request_serializer=service__pb2.ProcessingRequest.SerializeToString,
-        response_deserializer=service__pb2.ProcessingResponse.FromString,
-        )
-    self.ProcessSimple2 = channel.unary_stream(
-        '/envoy.service.ext_proc.v3.ExternalProcessor/ProcessSimple2',
-        request_serializer=service__pb2.ProcessingRequest.SerializeToString,
-        response_deserializer=service__pb2.ProcessingResponse.FromString,
-        )
 
 
 class ExternalProcessorServicer(object):
@@ -102,47 +87,11 @@ class ExternalProcessorServicer(object):
     context.set_details('Method not implemented!')
     raise NotImplementedError('Method not implemented!')
 
-  def ProcessSimple(self, request, context):
-    """TODO(sampath): Clean-up Below RPCs
-    """
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
-
-  def ProcessSimple1(self, request_iterator, context):
-    # missing associated documentation comment in .proto file
-    pass
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
-
-  def ProcessSimple2(self, request, context):
-    # missing associated documentation comment in .proto file
-    pass
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
-
 
 def add_ExternalProcessorServicer_to_server(servicer, server):
   rpc_method_handlers = {
       'Process': grpc.stream_stream_rpc_method_handler(
           servicer.Process,
-          request_deserializer=service__pb2.ProcessingRequest.FromString,
-          response_serializer=service__pb2.ProcessingResponse.SerializeToString,
-      ),
-      'ProcessSimple': grpc.unary_unary_rpc_method_handler(
-          servicer.ProcessSimple,
-          request_deserializer=service__pb2.ProcessingRequest.FromString,
-          response_serializer=service__pb2.ProcessingResponse.SerializeToString,
-      ),
-      'ProcessSimple1': grpc.stream_unary_rpc_method_handler(
-          servicer.ProcessSimple1,
-          request_deserializer=service__pb2.ProcessingRequest.FromString,
-          response_serializer=service__pb2.ProcessingResponse.SerializeToString,
-      ),
-      'ProcessSimple2': grpc.unary_stream_rpc_method_handler(
-          servicer.ProcessSimple2,
           request_deserializer=service__pb2.ProcessingRequest.FromString,
           response_serializer=service__pb2.ProcessingResponse.SerializeToString,
       ),
