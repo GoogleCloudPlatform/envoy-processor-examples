@@ -49,13 +49,11 @@ HEALTH_CHECK_PORT = 80
 # extensions.
 def add_headers_mutation(headers: List[tuple[str, str]], clear_route_cache: bool = False) -> service_pb2.HeadersResponse:
     response_header_mutation = service_pb2.HeadersResponse()
-    response_header_mutation.response.header_mutation.add().set_headers(
-        [
-            service_pb2.HeaderValueOption(
-                header=service_pb2.HeaderValue(key=k, raw_value=bytes(v, "utf-8"))
-            ) for k, v in headers
-        ]
-    )
+    response_header_mutation.response.header_mutation.set_headers.extend([
+        service_pb2.HeaderValueOption(
+            header=service_pb2.HeaderValue(key=k, raw_value=bytes(v, "utf-8"))
+        ) for k, v in headers
+    ])
     if clear_route_cache:
         response_header_mutation.response.clear_route_cache = True
     return response_header_mutation
