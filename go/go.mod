@@ -7,5 +7,5 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	go.uber.org/zap v1.20.0
 	golang.org/x/net v0.17.0
-	google.golang.org/grpc v1.58.2
+	google.golang.org/grpc v1.58.3
 )
