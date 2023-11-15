@@ -36,13 +36,9 @@ Build the external processing server and run it in the background on port 10002:
     go build ./cmd/processor
     ./processor -p 10002 &
 
-### Build and Start the Rust processor
+Alternately, the processor may be run listening on a unix socket
 
-The rust version works in a similar way:
-
-    cd rust
-    cargo build --profile release
-    ./target/release/envoy-processor -p 10002 &ls targ
+    ./processor -s /tmp/processor.sock &
 
 ### Get Envoy
 
@@ -94,7 +90,7 @@ does not process the body, so an arbitrary amount of data may be streamed.
 
 ### GET /addHeader
 
-Same as "/hello", but the processing server adds the header 
+Same as "/hello", but the processing server adds the header
 "x-external-processor-status" to the response.
 
 ### POST /echohashstream
@@ -143,7 +139,7 @@ To verify:
 ### POST /checkJson
 
 Same as /echo, but if the Content-Type field on the request is set to
-"application/json", then return an error if the posted content is not a 
+"application/json", then return an error if the posted content is not a
 valid JSON message.
 
 The golang JSON processor is not capable of streaming, so for this the processor

@@ -16,7 +16,7 @@ static_resources:
   listeners:
   - name: http
     address:
-      socket_address: 
+      socket_address:
         address: 127.0.0.1
         port_value: 10000
     filter_chains:
@@ -30,12 +30,13 @@ static_resources:
             name: local_route
             virtual_hosts:
             - name: local_service
-              domains: 
+              domains:
                 - "*"
               routes:
-              - match: 
+              - match:
                   prefix: "/"
-                route: 
+                name: "test-route"
+                route:
                   cluster: test
 
           http_filters:
@@ -74,6 +75,12 @@ static_resources:
     type: STATIC
     lb_policy: ROUND_ROBIN
     http2_protocol_options: {}
+    health_checks:
+    - timeout: 1s
+      interval: 1s
+      unhealthy_threshold: 1
+      healthy_threshold: 1
+      tcp_health_check: {}
     load_assignment:
       cluster_name: processor
       endpoints:
@@ -83,6 +90,11 @@ static_resources:
               socket_address:
                 address: 127.0.0.1
                 port_value: 10002
+      - lb_endpoints:
+        - endpoint:
+            address:
+              pipe:
+                path: /tmp/processor.sock
 
 admin:
   access_log_path: /dev/null
